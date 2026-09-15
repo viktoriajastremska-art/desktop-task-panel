@@ -1,0 +1,17 @@
+# Local settings and runtime state — never commit these
+config.json
+tasks.json
+geometry.json
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

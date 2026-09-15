@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Task Panel
+Comment=Translucent desktop task list with one-click Jira tickets
+Exec=/usr/bin/python3 %h/.local/share/task-panel/taskpanel.py
+Icon=view-task
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

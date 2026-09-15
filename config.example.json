@@ -1,0 +1,23 @@
+{
+  "jira": {
+    "base_url": "https://your-company.atlassian.net",
+    "token": "YOUR_JIRA_PERSONAL_ACCESS_TOKEN",
+    "project": "TASK",
+    "issue_type_id": "10002",
+    "assignee": "you@example.com",
+    "status_refresh_seconds": 600
+  },
+
+  "llm": {
+    "url": "https://api.openai.com/v1/chat/completions",
+    "model": "gpt-4o-mini",
+    "api_key": "",
+    "api_key_env": "LLM_API_KEY",
+    "auth_path": "",
+    "auth_account": "",
+    "max_tokens": 4000,
+    "temperature": 0.2,
+    "user_agent": "task-panel/1.0",
+    "headers": {}
+  }
+}
