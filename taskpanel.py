@@ -135,6 +135,10 @@ popover > contents { background: transparent; color: #e8e8f0; }
 calendar { color: #e8e8f0; background: transparent; }
 calendar:selected { background: #F8C671; color: #16110a; border-radius: 6px; }
 calendar.header, calendar.holiday { background: transparent; }
+
+.scrim { background: rgba(6, 8, 13, 0.72); }
+.remcard { background: rgba(15, 18, 28, 0.98); border: 1px solid rgba(232, 173, 98, 0.32);
+           border-radius: 12px; padding: 10px; }
 """
 
 
@@ -229,6 +233,7 @@ class Panel(Gtk.ApplicationWindow):
         sw.set_vexpand(True); sw.set_hexpand(True)
         sw.set_child(self.list_box)
         root.append(sw)
+        self.sw = sw
 
         # ---------- composer ----------
         sep2 = Gtk.Box(); sep2.add_css_class("sep")
@@ -271,19 +276,28 @@ class Panel(Gtk.ApplicationWindow):
         self.count_lbl.set_halign(Gtk.Align.END)
         foot.append(self.count_lbl)
 
-        # ---------- compact reminder popover ----------
+        # ---------- reminder picker (in-window overlay, always interactive) ----
         self._reminder_task = None
-        self.reminder_pop = Gtk.Popover()
-        self.reminder_pop.set_has_arrow(True)
-        pbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        pbox.set_margin_top(10); pbox.set_margin_bottom(10)
-        pbox.set_margin_start(10); pbox.set_margin_end(10)
-        self.reminder_pop.set_child(pbox)
+        self.rem_scrim = Gtk.Box()
+        self.rem_scrim.add_css_class("scrim")
+        self.rem_scrim.set_visible(False)
+        scrim_click = Gtk.GestureClick.new()
+        scrim_click.connect("pressed", self._on_scrim_click)
+        self.rem_scrim.add_controller(scrim_click)
+
+        self.rem_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.rem_card.add_css_class("remcard")
+        self.rem_card.set_halign(Gtk.Align.CENTER)
+        self.rem_card.set_valign(Gtk.Align.CENTER)
+        self.rem_card.set_margin_top(10); self.rem_card.set_margin_bottom(10)
+        self.rem_card.set_margin_start(10); self.rem_card.set_margin_end(10)
+        self.rem_scrim.append(self.rem_card)
+
         self.calendar = Gtk.Calendar()
-        pbox.append(self.calendar)
+        self.rem_card.append(self.calendar)
 
         trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        pbox.append(trow)
+        self.rem_card.append(trow)
         tl = Gtk.Label(label="Time"); tl.add_css_class("sub")
         trow.append(tl)
         self.time_entry = Gtk.Entry()
@@ -298,18 +312,26 @@ class Panel(Gtk.ApplicationWindow):
             trow.append(qb)
 
         brow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        pbox.append(brow)
+        self.rem_card.append(brow)
         self.rem_clear = Gtk.Button(label="Clear")
         self.rem_clear.add_css_class("ghost")
         self.rem_clear.connect("clicked", self.clear_reminder)
         brow.append(self.rem_clear)
         sp = Gtk.Box(); sp.set_hexpand(True); brow.append(sp)
+        cancelb = Gtk.Button(label="Cancel")
+        cancelb.add_css_class("ghost")
+        cancelb.connect("clicked", lambda *_: self.close_reminder_pop())
+        brow.append(cancelb)
         okb = Gtk.Button(label="OK")
         okb.add_css_class("primary")
         okb.connect("clicked", self.apply_reminder)
         brow.append(okb)
 
         self._add_resize_handles(outer)
+        outer.add_overlay(self.rem_scrim)
+        esc = Gtk.EventControllerKey.new()
+        esc.connect("key-pressed", self._on_window_key)
+        self.add_controller(esc)
 
         self.set_mode("add")
         self.populate()
@@ -599,25 +621,37 @@ class Panel(Gtk.ApplicationWindow):
         return lbl
 
     def close_reminder_pop(self):
+        self.rem_scrim.set_visible(False)
+
+    def _on_scrim_click(self, gesture, n_press, x, y):
         try:
-            self.reminder_pop.popdown()
+            ok, rect = self.rem_card.compute_bounds(self.rem_scrim)
+            inside = ok and (rect.origin.x <= x <= rect.origin.x + rect.size.width
+                             and rect.origin.y <= y <= rect.origin.y + rect.size.height)
         except Exception:
-            pass
-        if self.reminder_pop.get_parent() is not None:
-            self.reminder_pop.unparent()
+            inside = False
+        if not inside:
+            self.close_reminder_pop()
+
+    def _on_window_key(self, ctrl, keyval, keycode, state):
+        if keyval == Gdk.KEY_Escape and self.rem_scrim.get_visible():
+            self.close_reminder_pop()
+            return True
+        return False
 
     def open_reminder(self, button, task):
         self._reminder_task = task
         r = task.get("remind")
         dt = (datetime.datetime.fromtimestamp(r) if r
               else datetime.datetime.now().replace(minute=0, second=0, microsecond=0))
-        self.calendar.select_day(GLib.DateTime.new_local(dt.year, dt.month, dt.day, 0, 0, 0.0))
+        day = GLib.DateTime.new_local(dt.year, dt.month, dt.day, 0, 0, 0.0)
+        try:
+            self.calendar.set_date(day)
+        except Exception:
+            self.calendar.select_day(day)
         self.time_entry.set_text(dt.strftime("%H:%M"))
         self.rem_clear.set_visible(bool(r))
-        if self.reminder_pop.get_parent() is not None:
-            self.reminder_pop.unparent()
-        self.reminder_pop.set_parent(button)
-        self.reminder_pop.popup()
+        self.rem_scrim.set_visible(True)
 
     def _parse_time(self, text):
         try:
@@ -721,8 +755,31 @@ class Panel(Gtk.ApplicationWindow):
         run_async(work, done, fail)
 
     # ------------------------------------------------------------- render
+    def _restore_scroll(self, target):
+        """Keep the list where the user left it after a rebuild.
+
+        Removing rows collapses the scrollable height, which makes the
+        adjustment jump to 0; re-apply the old offset once the new layout
+        has grown enough to accept it (bounded, so a shorter list can't spin).
+        """
+        adj = self.sw.get_vadjustment()
+        tries = {"n": 0}
+
+        def apply():
+            hi = max(adj.get_lower(), adj.get_upper() - adj.get_page_size())
+            if hi + 0.5 >= target or tries["n"] >= 6:
+                adj.set_value(min(target, hi))
+                return False
+            adj.set_value(hi)
+            tries["n"] += 1
+            return True
+
+        GLib.timeout_add(16, apply)
+
     def populate(self):
-        self.close_reminder_pop()
+        target = self.sw.get_vadjustment().get_value()
+        if self._reminder_task is not None and self._reminder_task not in self.store["tasks"]:
+            self.close_reminder_pop()
         child = self.list_box.get_first_child()
         while child:
             nxt = child.get_next_sibling()
@@ -760,6 +817,8 @@ class Panel(Gtk.ApplicationWindow):
                 self.list_box.append(lbl)
             for task in done:
                 self.list_box.append(self.render_done_task(task))
+
+        self._restore_scroll(target)
 
     def render_done_task(self, task):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
