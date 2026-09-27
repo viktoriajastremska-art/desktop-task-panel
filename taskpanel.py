@@ -17,6 +17,7 @@ Storage: ~/.cache/task-panel/tasks.json
 """
 import datetime
 import json
+import locale
 import os
 import subprocess
 import sys
@@ -133,7 +134,9 @@ popover { background: rgba(15, 18, 28, 0.98); border: 1px solid rgba(232, 173, 9
           border-radius: 12px; }
 popover > contents { background: transparent; color: #e8e8f0; }
 calendar { color: #e8e8f0; background: transparent; }
-calendar:selected { background: #F8C671; color: #16110a; border-radius: 6px; }
+.day-number:selected { background-color: #F8C671; color: #16110a; border-radius: 6px; }
+.day-number.today { color: #F8C671; }
+.chosen { color: #F8C671; font-size: 11px; }
 calendar.header, calendar.holiday { background: transparent; }
 
 .scrim { background: rgba(6, 8, 13, 0.72); }
@@ -159,6 +162,15 @@ def run_async(fn, on_done=None, on_error=None):
 class Panel(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app)
+        # GtkCalendar takes the first day of week from LC_TIME; en_GB starts on
+        # Monday. Set it before the calendar is created so the week starts Monday.
+        try:
+            locale.setlocale(locale.LC_TIME, "en_GB.UTF-8")
+        except Exception:
+            try:
+                locale.setlocale(locale.LC_TIME, "en_GB.utf8")
+            except Exception:
+                pass
         self.set_title("Tasks")
         self.set_decorated(False)
         self.set_resizable(True)
@@ -291,10 +303,16 @@ class Panel(Gtk.ApplicationWindow):
         self.rem_card.set_valign(Gtk.Align.CENTER)
         self.rem_card.set_margin_top(10); self.rem_card.set_margin_bottom(10)
         self.rem_card.set_margin_start(10); self.rem_card.set_margin_end(10)
-        self.rem_scrim.append(self.rem_card)
+        self.rem_card.set_visible(False)
 
         self.calendar = Gtk.Calendar()
         self.rem_card.append(self.calendar)
+        self.calendar.connect("day-selected", lambda *_: self._sync_chosen())
+        self.chosen_lbl = Gtk.Label()
+        self.chosen_lbl.add_css_class("chosen")
+        self.chosen_lbl.set_halign(Gtk.Align.START)
+        self.chosen_lbl.set_xalign(0)
+        self.rem_card.append(self.chosen_lbl)
 
         trow = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.rem_card.append(trow)
@@ -329,6 +347,7 @@ class Panel(Gtk.ApplicationWindow):
 
         self._add_resize_handles(outer)
         outer.add_overlay(self.rem_scrim)
+        outer.add_overlay(self.rem_card)
         esc = Gtk.EventControllerKey.new()
         esc.connect("key-pressed", self._on_window_key)
         self.add_controller(esc)
@@ -622,16 +641,16 @@ class Panel(Gtk.ApplicationWindow):
 
     def close_reminder_pop(self):
         self.rem_scrim.set_visible(False)
+        self.rem_card.set_visible(False)
+
+    def _sync_chosen(self):
+        d = self.calendar.get_date()
+        self.chosen_lbl.set_text("Chosen: " + d.format("%d.%m.%Y"))
 
     def _on_scrim_click(self, gesture, n_press, x, y):
-        try:
-            ok, rect = self.rem_card.compute_bounds(self.rem_scrim)
-            inside = ok and (rect.origin.x <= x <= rect.origin.x + rect.size.width
-                             and rect.origin.y <= y <= rect.origin.y + rect.size.height)
-        except Exception:
-            inside = False
-        if not inside:
-            self.close_reminder_pop()
+        # The card is a separate overlay child on top of the scrim, so any
+        # press that reaches the scrim is by definition outside the card.
+        self.close_reminder_pop()
 
     def _on_window_key(self, ctrl, keyval, keycode, state):
         if keyval == Gdk.KEY_Escape and self.rem_scrim.get_visible():
@@ -652,6 +671,8 @@ class Panel(Gtk.ApplicationWindow):
         self.time_entry.set_text(dt.strftime("%H:%M"))
         self.rem_clear.set_visible(bool(r))
         self.rem_scrim.set_visible(True)
+        self.rem_card.set_visible(True)
+        self._sync_chosen()
 
     def _parse_time(self, text):
         try:
