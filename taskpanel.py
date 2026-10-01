@@ -865,6 +865,7 @@ class Panel(Gtk.ApplicationWindow):
         t.set_markup(f"<s>{GLib.markup_escape_text(task['text'])}</s>")
         t.set_wrap(True); t.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         t.set_xalign(0); t.set_halign(Gtk.Align.FILL)
+        t.set_justify(Gtk.Justification.FILL)
         content.append(t)
         for c in task.get("children", []):
             if c.get("kind") == "bullet":
@@ -872,6 +873,7 @@ class Panel(Gtk.ApplicationWindow):
                 b.add_css_class("donebullet")
                 b.set_wrap(True); b.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
                 b.set_xalign(0); b.set_halign(Gtk.Align.FILL)
+                b.set_justify(Gtk.Justification.FILL)
                 content.append(b)
             elif c.get("kind") == "ticket":
                 row2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -938,6 +940,7 @@ class Panel(Gtk.ApplicationWindow):
         t.add_css_class("tasktext")
         t.set_wrap(True); t.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         t.set_xalign(0); t.set_halign(Gtk.Align.FILL)
+        t.set_justify(Gtk.Justification.FILL)
         click = Gtk.GestureClick.new()
         click.connect("pressed", lambda g, n, x, y, tk=task: self.on_text_click(tk))
         t.add_controller(click)
@@ -1011,6 +1014,8 @@ class Panel(Gtk.ApplicationWindow):
             lbl.add_css_class("bullet")
             lbl.set_wrap(True); lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             lbl.set_xalign(0); lbl.set_halign(Gtk.Align.FILL)
+            lbl.set_hexpand(True)
+            lbl.set_justify(Gtk.Justification.FILL)
             row.append(lbl)
         return row
 
