@@ -106,6 +106,9 @@ python3 ~/.local/share/task-panel/taskpanel.py &
   into the composer. `Esc` cancels.
 - **＋ ticket** — drafts an English ticket with the LLM, creates it in Jira,
   and links it under the task.
+- **done** (next to each linked ticket) — moves that Jira issue through its
+  *Done* transition and updates its status in the list. When every ticket on a
+  task is Done, the task is marked done too.
 - **⏰** — set a reminder for any date and time. A desktop notification fires
   when it is due.
 - **✓** — mark done (it moves to *Completed*); **↺** restores it.

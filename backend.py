@@ -201,6 +201,37 @@ def jira_status(key):
         return None
 
 
+def jira_transitions(key):
+    """Available workflow transitions for an issue."""
+    return _jira("GET", f"/rest/api/2/issue/{key}/transitions").get("transitions", [])
+
+
+def _find_done_transition(transitions):
+    """Pick the transition whose name (or target status) contains 'done'."""
+    for t in transitions:
+        if "done" in (t.get("name") or "").lower():
+            return t
+    for t in transitions:
+        target = (t.get("to") or {}).get("name") or ""
+        if "done" in target.lower():
+            return t
+    return None
+
+
+def jira_transition_done(key):
+    """Move an issue through its Done transition. Returns the new status name."""
+    tr = _find_done_transition(jira_transitions(key))
+    if not tr:
+        raise RuntimeError(f"no Done transition available for {key}")
+    try:
+        _jira("POST", f"/rest/api/2/issue/{key}/transitions",
+              {"transition": {"id": tr["id"]}}, timeout=30)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        raise RuntimeError(f"Jira {e.code}: {detail[:300]}")
+    return jira_status(key)
+
+
 def jira_my_open_count(project=None):
     """How many open issues are assigned to me (optionally in one project)."""
     cfg = config()["jira"]

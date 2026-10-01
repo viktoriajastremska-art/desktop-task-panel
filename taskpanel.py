@@ -11,6 +11,7 @@ How it works
   * click a task text once to edit it (loads all its lines back into the composer)
   * "＋ ticket" — the configured LLM writes an English title + context, creates
     the issue in your Jira project (assigned to you) and drops a link under the task
+  * "done" next to a linked ticket — moves that Jira issue to its Done status
   * "✓" — done (disappears);  trash — delete
 
 Storage: ~/.cache/task-panel/tasks.json
@@ -95,6 +96,14 @@ button.ticket label { color: #16110a; }
 button.ticket:hover { background-image: linear-gradient(180deg, #ffd27f, #F0B76C); }
 button.ticket:disabled { background-image: none; background: rgba(248, 198, 113, 0.18); }
 button.ticket:disabled label { color: rgba(248, 198, 113, 0.7); }
+button.ticketdone { color: #7FB6A8; border: 1px solid rgba(127, 182, 168, 0.5);
+                    background: rgba(127, 182, 168, 0.08); border-radius: 999px;
+                    padding: 1px 9px; font-size: 9.5px; font-weight: 600; }
+button.ticketdone:hover { background: rgba(127, 182, 168, 0.20); border-color: rgba(127, 182, 168, 0.75); }
+button.ticketdone.done { color: #0d1713; border-color: transparent; background: #7FB6A8; }
+button.ticketdone.done label { color: #0d1713; }
+button.ticketdone.loading { color: rgba(127, 182, 168, 0.65); border-style: dashed;
+                            border-color: rgba(127, 182, 168, 0.35); }
 button.primary { color: #16110a; background-image: linear-gradient(180deg, #F8C671, #E8AD62);
                  border-radius: 9px; padding: 5px 14px; font-weight: 600; font-size: 10px; }
 button.primary label { color: #16110a; }
@@ -940,7 +949,7 @@ class Panel(Gtk.ApplicationWindow):
 
         # children
         for c in task.get("children", []):
-            content.append(self.render_child(c))
+            content.append(self.render_child(c, task))
 
         # actions on the right
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
@@ -974,7 +983,7 @@ class Panel(Gtk.ApplicationWindow):
         actions.append(self.kill_button(task))
         return row
 
-    def render_child(self, c):
+    def render_child(self, c, task):
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         if c.get("kind") == "ticket":
             arrow = Gtk.Label(label="↗"); arrow.add_css_class("ticketrow")
@@ -991,6 +1000,7 @@ class Panel(Gtk.ApplicationWindow):
                 sl = Gtk.Label(label=c["status"]); sl.add_css_class("ticketmeta")
                 sl.set_valign(Gtk.Align.START)
                 row.append(sl)
+            row.append(self.ticket_done_button(task, c))
         else:
             dot = Gtk.Label(label="•"); dot.add_css_class("dot")
             dot.set_valign(Gtk.Align.START)
@@ -1006,6 +1016,65 @@ class Panel(Gtk.ApplicationWindow):
 
     def on_text_click(self, task):
         self.start_edit(task)
+
+    # --------------------------------------------------- ticket done action
+    def _ticket_done(self, child):
+        return "done" in (child.get("status") or "").lower()
+
+    def _all_tickets_done(self, task):
+        tickets = [c for c in task.get("children", []) if c.get("kind") == "ticket"]
+        return bool(tickets) and all(self._ticket_done(c) for c in tickets)
+
+    def ticket_done_button(self, task, child):
+        if child.get("id") in self._busy:
+            b = Gtk.Label(label="⋯")
+            b.add_css_class("busy")
+            b.set_valign(Gtk.Align.START)
+            return b
+        if self._ticket_done(child):
+            b = Gtk.Button(label="✓ Done")
+            b.add_css_class("ticketdone"); b.add_css_class("done")
+            b.set_valign(Gtk.Align.START)
+            b.set_sensitive(False)
+            b.set_tooltip_text("Already Done in Jira")
+            return b
+        b = Gtk.Button(label="done")
+        b.add_css_class("ticketdone")
+        b.set_valign(Gtk.Align.START)
+        b.set_tooltip_text("Move this ticket to Done on the board")
+        b.connect("clicked", lambda *_, tk=task, ch=child: self.transition_ticket(tk, ch))
+        return b
+
+    def transition_ticket(self, task, child):
+        key = child.get("key")
+        if not key or child.get("id") in self._busy:
+            return
+        self._busy.add(child["id"])
+        self.set_status(f"{key}: moving to Done…")
+        self.populate()
+
+        def work():
+            return B.jira_transition_done(key)
+
+        def done(status):
+            self._busy.discard(child["id"])
+            child["status"] = status or "Done"
+            if self._all_tickets_done(task):
+                task["done"] = True
+                self.set_status(f"{key} → {child['status']} · task completed", "ok")
+            else:
+                self.set_status(f"{key} → {child['status']}", "ok")
+            B.save_tasks(self.store)
+            if self._editing is task and task.get("done"):
+                self.set_mode("add")
+            self.populate()
+
+        def fail(err):
+            self._busy.discard(child["id"])
+            self.set_status(f"{key}: {err}", "err")
+            self.populate()
+
+        run_async(work, done, fail)
 
     # ------------------------------------------------------------- sync
     def on_sync(self, *_):
